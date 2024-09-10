@@ -2,218 +2,125 @@ name: Deploy to Dev Environment
 
 on:
   push:
-    branches: 
-      - test
+    branches: ['dev', 'main', 'prod-support', 'uat']
+  pull_request:
+    branches: ['dev', 'main', 'prod-support', 'uat']
 
 env:
-  REPO_URL: 357586184453.dkr.ecr.eu-west-1.amazonaws.com/identity-management-dev-backend
-  ECR_REPOSITORY: identity-management-dev-backend
-  ECR_REPOSITORY_SYSTEST: identity-management-systest
-  AWS_REGION: eu-west-1
-  CLUSTER: Gatekeeper
-  SERVICE: identity-management
-  SYSTEST_SERVICE: identity-management-systest
-
-  DATABASE_URL: mongodb+srv://enumv2-db:PiD96zMcGQ51uglf@enumv2cluster.wzg2rjz.mongodb.net/
-  DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
-  MASTER_REALM_CLIENT_SECRET: ${{ secrets.MASTER_REALM_CLIENT_SECRET }}
-  ADMIN_CLIENT_SECRET: ${{ secrets.ADMIN_CLIENT_SECRET }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  EMAILS: 'PutALLemails.com, ThisIsDformat '
 
 jobs:
-  test:
-    name: Deploy to dev and systest
+
+  build-and-analyze:
+    name: Build and Analyze
     runs-on: ubuntu-latest
+    outputs:
+      sonarqube_url_set: ${{ steps.get_sonarqube_url.outputs.sonarqube_url_set }}
 
     steps:
       - uses: actions/checkout@v3
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Maven Package
-        env:
-            DATABASE_URL: ${{ env.DATABASE_URL }}
-            DATABASE_NAME: ${{ env.DATABASE_NAME }}
-            KEYCLOAK_INTROSPECTION_URI: ${{ secrets.KEYCLOAK_INTROSPECTION_URI }}
-            KEYCLOAK_SERVER_URL: ${{ secrets.KEYCLOAK_SERVER_URL }}
-            KEYCLOAK_CLIENT_ID: ${{ secrets.KEYCLOAK_CLIENT_ID }}
-            CLIENT_ID:  ${{ secrets.CLIENT_ID }}
-            KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
-            ADMIN_CLIENT_ID: ${{ secrets.ADMIN_CLIENT_ID }}
-            KEYCLOAK_ADMIN_CLIENT_ID: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_ID }}
-            KEYCLOAK_MASTER_REALM: ${{ secrets.KEYCLOAK_MASTER_REALM }}
-            KEYCLOAK_USERNAME: ${{ secrets.KEYCLOAK_USERNAME }}
-            KEYCLOAK_PASSWORD: ${{ secrets.KEYCLOAK_PASSWORD }}
-            KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
-            CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-            EUREKA_URL: ${{ secrets.EUREKA_URL }}
-            PROFILE: ${{ secrets.PROFILE }}
-            IDENTITY_SERVICE_APPLICATION_NAME: ${{ secrets.IDENTITY_SERVICE_APPLICATION_NAME }}
-            MASTER_REALM_CLIENT_SECRET: ${{ env.MASTER_REALM_CLIENT_SECRET }}
-            ADMIN_CLIENT_SECRET: ${{ env.ADMIN_CLIENT_SECRET }}
-            SECOND_CLIENT_SECRET: ${{ secrets.SECOND_CLIENT_SECRET}}
-            PORT: ${{ secrets.PORT }}
-
-            QORE_ID_CLIENT_ID: ${{ secrets.QORE_ID_CLIENT_ID }}
-            QORE_ID_CLIENT_SECRET: ${{ secrets.QORE_ID_CLIENT_SECRET }}
-            QORE_ID_URL: ${{ secrets.QORE_ID_URL }}
-            QORE_ID_TEST_NIN_NUMBER: ${{ secrets.QORE_ID_TEST_NIN_NUMBER }}
-            QORE_ID_TEST_BVN_NUMBER: ${{ secrets.QORE_ID_TEST_BVN_NUMBER }}
-            QORE_ID_TEST_RC_NUMBER: ${{ secrets.QORE_ID_TEST_RC_NUMBER }}
-
-
-            PREMBLY_API_KEY: ${{ secrets.PREMBLY_API_KEY }}
-            PREMBLY_APP_ID: ${{ secrets.PREMBLY_APP_ID }}
-            PREMBLY_URL: ${{ secrets.PREMBLY_URL }}
-            PREMBLY_ID_TEST_NIN_NUMBER: ${{ secrets.PREMBLY_ID_TEST_NIN_NUMBER }}
-            PREMBLY_ID_TEST_BVN_NUMBER: ${{ secrets.PREMBLY_ID_TEST_BVN_NUMBER }}
-            PREMBLY_ID_TEST_CAC_NUMBER: ${{ secrets.PREMBLY_ID_TEST_CAC_NUMBER }}
-            EUREKA_INSTANCE_HOSTNAME: ${{ secrets.EUREKA_INSTANCE_HOSTNAME }}
-            
-        run: |
-            mvn -B clean verify
-            mvn site
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Deploy to S3
-        if: always()
-        env:
-          S3_BUCKET: semicolon-build-reports
-          PROJECT_NAME: karrabo/identity-management/maven-reports
-        run: |
-          # Upload new Site reports
-          aws s3 sync target/site s3://${S3_BUCKET}/${PROJECT_NAME}/new-reports
-
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: npm install
         
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-         name: site
-         path: target/surefire-reports
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
+      - name: Run build
+        run: npm run build
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+          
+      - name: Get SonarQube URL
+        id: get_sonarqube_url
+        if: always()
+        run: echo "sonarqube_url_set=true" >> $GITHUB_OUTPUT
 
-      - name: Update ECS service
-        run: |
-          aws ecs update-service --cluster ${{ env.CLUSTER }} --service ${{ env.SERVICE }} --force-new-deployment
-
-      # - name: Wait for 10 minutes
-      #   run: sleep 600
-
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.12.3'
-
-      - name: Run automation test
-        env:
-          REPO_PAT: ${{ secrets.REPO_PAT }}
-          BASE_URL: ${{ secrets.BASE_URL }}
-        run: |
-          chmod +x ${{ github.workspace }}/run_pytest.sh
-          ${{ github.workspace }}/run_pytest.sh
-        shell: bash
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-systest-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ ECR_REPOSITORY_SYSTEST:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_SYSTEST:latest
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY_SYSTEST:latest" >> $GITHUB_OUTPUT
-
-      - name: Update ECS service
-        run: |
-          aws ecs update-service --cluster ${{ env.CLUSTER }} --service ${{ env.SYSTEST_SERVICE }} --force-new-deployment
-
-
-  build:
-    name: Build and analyze
+  send_notification:
+    name: Send Email Notification
+    needs: [build-and-analyze]
     runs-on: ubuntu-latest
+    if: always()
     
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - name: Set up JDK 17
-        uses: actions/setup-java@v1
-        with:
-          java-version: 17
-      - name: Cache SonarQube packages
-        uses: actions/cache@v1
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-      - name: Cache Maven packages
-        uses: actions/cache@v1
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-      - name: Build and analyze
+      - uses: actions/checkout@v3
+      - name: Set environment variables
+        run: |
+          # Define your project name
+          PROJECT_NAME="e-meca-next-frontend"
+      
+          # Get the short commit hash as a tag
+          echo "TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+      
+          # Determine the branch name: either from github.head_ref or using git rev-parse
+          if [ -n "${{ github.head_ref }}" ]; then
+            echo "BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          fi
+      
+          # Get the commit author
+          echo "COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an <%ae>')" >> $GITHUB_ENV
+      
+          # Sanitize the full commit message to remove newlines and special characters
+          sanitized_commit_message=$(git log -1 --pretty=%B | tr -d '\n' | tr -d '\r')
+          echo "COMMIT_MESSAGE=${sanitized_commit_message}" >> $GITHUB_ENV
+      
+          # Create a custom tag with ProjectName-BranchName-CommitMessageSummary
+          commit_message_summary=$(git log -1 --pretty=%s | tr -d '\n' | tr -d '\r')  
+          CUSTOM_TAG="${PROJECT_NAME}-${BRANCH_NAME}-${commit_message_summary// /_}"  
+          echo "TAG=${CUSTOM_TAG}" >> $GITHUB_ENV
+
+        
+      - name: Send build success email notification
+        if: success()
         env:
-            SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-            SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-            DATABASE_URL: ${{ env.DATABASE_URL }}
-            DATABASE_NAME: ${{ env.DATABASE_NAME }}
-            KEYCLOAK_INTROSPECTION_URI: ${{ secrets.KEYCLOAK_INTROSPECTION_URI }}
-            KEYCLOAK_SERVER_URL: ${{ secrets.KEYCLOAK_SERVER_URL }}
-            KEYCLOAK_CLIENT_ID: ${{ secrets.KEYCLOAK_CLIENT_ID }}
-            CLIENT_ID:  ${{ secrets.CLIENT_ID }}
-            KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
-            ADMIN_CLIENT_ID: ${{ secrets.ADMIN_CLIENT_ID }}
-            KEYCLOAK_ADMIN_CLIENT_ID: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_ID }}
-            KEYCLOAK_MASTER_REALM: ${{ secrets.KEYCLOAK_MASTER_REALM }}
-            KEYCLOAK_USERNAME: ${{ secrets.KEYCLOAK_USERNAME }}
-            KEYCLOAK_PASSWORD: ${{ secrets.KEYCLOAK_PASSWORD }}
-            KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
-            CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-            EUREKA_URL: ${{ secrets.EUREKA_URL }}
-            PROFILE: ${{ secrets.PROFILE }}
-            IDENTITY_SERVICE_APPLICATION_NAME: ${{ secrets.IDENTITY_SERVICE_APPLICATION_NAME }}
-            MASTER_REALM_CLIENT_SECRET: ${{ env.MASTER_REALM_CLIENT_SECRET }}
-            ADMIN_CLIENT_SECRET: ${{ env.ADMIN_CLIENT_SECRET }}
-            SECOND_CLIENT_SECRET: ${{ secrets.SECOND_CLIENT_SECRET}}
-            PORT: ${{ secrets.PORT }}
-
-            QORE_ID_CLIENT_ID: ${{ secrets.QORE_ID_CLIENT_ID }}
-            QORE_ID_CLIENT_SECRET: ${{ secrets.QORE_ID_CLIENT_SECRET }}
-            QORE_ID_URL: ${{ secrets.QORE_ID_URL }}
-            QORE_ID_TEST_NIN_NUMBER: ${{ secrets.QORE_ID_TEST_NIN_NUMBER }}
-            QORE_ID_TEST_BVN_NUMBER: ${{ secrets.QORE_ID_TEST_BVN_NUMBER }}
-            QORE_ID_TEST_RC_NUMBER: ${{ secrets.QORE_ID_TEST_RC_NUMBER }}
-
-
-            PREMBLY_API_KEY: ${{ secrets.PREMBLY_API_KEY }}
-            PREMBLY_APP_ID: ${{ secrets.PREMBLY_APP_ID }}
-            PREMBLY_URL: ${{ secrets.PREMBLY_URL }}
-            PREMBLY_ID_TEST_NIN_NUMBER: ${{ secrets.PREMBLY_ID_TEST_NIN_NUMBER }}
-            PREMBLY_ID_TEST_BVN_NUMBER: ${{ secrets.PREMBLY_ID_TEST_BVN_NUMBER }}
-            PREMBLY_ID_TEST_CAC_NUMBER: ${{ secrets.PREMBLY_ID_TEST_CAC_NUMBER }}
-            EUREKA_INSTANCE_HOSTNAME: ${{ secrets.EUREKA_INSTANCE_HOSTNAME }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=Karrabo-Identity-Management -Dsonar.projectName='Karrabo-Identity-Management'
+          SMTP_SERVER: semicolon.africa
+          SMTP_PORT: 465
+          SMTP_USERNAME: builds@semicolon.africa
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Sending success email..."
+          chmod +x .github/workflows/scripts/send_success_email.sh
+          .github/workflows/scripts/send_success_email.sh \
+            "$SMTP_SERVER" \
+            "$SMTP_PORT" \
+            "$SMTP_USERNAME" \
+            "$SMTP_PASSWORD" \
+            "${{ env.EMAILS }}" \
+            "${{ env.TAG }}" \
+            "${{ env.BRANCH_NAME }}" \
+            "${{ env.COMMIT_AUTHOR }}" \
+            "${{ needs.build-and-analyze.outputs.sonarqube_url_set }}" \
+            "$BUILD_REPORT_URL_SET" \
+            "$AUTOMATION_TEST_URL_SET" \
+            "${{ env.COMMIT_MESSAGE }}"
+            
+      - name: Send build failure email notification
+        if: failure()
+        env:
+          SMTP_SERVER: semicolon.africa
+          SMTP_PORT: 465
+          SMTP_USERNAME: builds@semicolon.africa
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Sending failure email..."
+          chmod +x .github/workflows/scripts/send_failure_email.sh
+          .github/workflows/scripts/send_failure_email.sh \
+            "$SMTP_SERVER" \
+            "$SMTP_PORT" \
+            "$SMTP_USERNAME" \
+            "$SMTP_PASSWORD" \
+            "${{ env.EMAILS }}" \
+            "${{ env.TAG }}" \
+            "${{ env.BRANCH_NAME }}" \
+            "${{ env.COMMIT_AUTHOR }}" \
+            "${{ needs.build-and-analyze.outputs.sonarqube_url_set }}" \
+            "$BUILD_REPORT_URL_SET" \
+            "$AUTOMATION_TEST_URL_SET" \
+            "${{ env.COMMIT_MESSAGE }}"
