@@ -1,0 +1,97 @@
+name: Deploy to S3 and CloudFront
+
+on:
+  push:
+    branches:
+      - main  # Adjust based on your deployment branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'  # Adjust based on your project requirements
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Build the project
+      run: npm run build
+
+    - name: Configure AWS CLI
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Deploy to S3
+      run: |
+        aws s3 sync ./build s3://${{ secrets.S3_BUCKET }} --delete --profile ${{ secrets.AWS_PROFILE }}
+    
+    - name: Check for existing CloudFront distribution
+      id: check_cloudfront
+      run: |
+        CLOUDFRONT_DIST_ID=$(aws cloudfront list-distributions \
+          --query "DistributionList.Items[?Origins.Items[0].DomainName=='${{ secrets.S3_BUCKET }}.s3.amazonaws.com'].Id | [0]" \
+          --output text --profile ${{ secrets.AWS_PROFILE }})
+        echo "::set-output name=dist_id::$CLOUDFRONT_DIST_ID"
+
+    - name: Create CloudFront distribution if it doesn't exist
+      if: steps.check_cloudfront.outputs.dist_id == 'None'
+      run: |
+        DISTRIBUTION_CONFIG=$(cat <<EOF
+        {
+          "CallerReference": "$(date +%s)",
+          "Comment": "${{ secrets.CLOUDFRONT_COMMENT }}",
+          "Origins": {
+            "Items": [
+              {
+                "Id": "${{ secrets.S3_BUCKET }}-origin",
+                "DomainName": "${{ secrets.S3_BUCKET }}.s3.amazonaws.com",
+                "OriginPath": "${{ secrets.CLOUDFRONT_ORIGIN_PATH }}",
+                "S3OriginConfig": {
+                  "OriginAccessIdentity": ""
+                }
+              }
+            ],
+            "Quantity": 1
+          },
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "${{ secrets.S3_BUCKET }}-origin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {
+              "Quantity": 7,
+              "Items": ["HEAD", "GET", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
+              "CachedMethods": {
+                "Quantity": 2,
+                "Items": ["HEAD", "GET"]
+              }
+            },
+            "Compress": true,
+            "ForwardedValues": {
+              "QueryString": false,
+              "Cookies": {
+                "Forward": "none"
+              }
+            },
+            "MinTTL": 0
+          },
+          "Enabled": true
+        }
+        EOF
+        )
+        aws cloudfront create-distribution --distribution-config "$DISTRIBUTION_CONFIG" --profile ${{ secrets.AWS_PROFILE }}
+
+    - name: Invalidate CloudFront cache
+      run: |
+        CLOUDFRONT_DIST_ID=$(aws cloudfront list-distributions \
+          --query "DistributionList.Items[?Origins.Items[0].DomainName=='${{ secrets.S3_BUCKET }}.s3.amazonaws.com'].Id | [0]" \
+          --output text --profile ${{ secrets.AWS_PROFILE }})
+        aws cloudfront create-invalidation --distribution-id $CLOUDFRONT_DIST_ID --paths "/*" --profile ${{ secrets.AWS_PROFILE }}
