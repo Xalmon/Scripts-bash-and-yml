@@ -7,9 +7,9 @@ EMAILS=$5
 TAG=$6
 BRANCH_NAME=$7
 COMMIT_AUTHOR=${8}
-SONARQUBE_URL=http://sonarqube.enum.africa/dashboard?id=your-project
-MAVEN_REPORT_URL=https://semicolon-build-reports.s3.eu-west-1.amazonaws.com/your-project/maven-reports/new-reports/surefire-report.html
-AUTOMATION_TEST_URL=https://semicolon-build-reports.s3.eu-west-1.amazonaws.com/your-project/automation-tests-result/report-pytest-results.html
+SONARQUBE_URL=http://sonarqube.enum.africa/dashboard?id=your-frontend-project
+NPM_REPORT_URL=https://your-cdn-url/your-frontend-project/npm-reports/latest-report.html
+AUTOMATION_TEST_URL=https://your-cdn-url/your-frontend-project/automation-tests-result/report.html
 
 SONARQUBE_URL_SET=${9}
 MAVEN_REPORT_URL_SET=${10}
@@ -51,7 +51,7 @@ MIME-Version: 1.0
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
     <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 5px; padding: 20px; margin-bottom: 20px;">
         <h1 style="color: #721c24; margin-top: 0;">Build Failure</h1>
-        <p style="margin-bottom: 10px;">Oooops, Your recent build in Getspares Backend was unsuccessful, kindly check the build details and fix.</p>
+        <p style="margin-bottom: 10px;">Oooops, Your recent test in your-project Backend was unsuccessful, kindly check the build details and fix.</p>
     </div>
     
     <div style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; padding: 20px; margin-bottom: 20px;">

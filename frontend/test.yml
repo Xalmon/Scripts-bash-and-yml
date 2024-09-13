@@ -1,0 +1,143 @@
+name: Deploy to Dev Environment
+
+on:
+  push:
+    branches: 
+      [ 'dev', 'main', 'prod-support', 'uat' ]
+  pull_request:
+    branches: 
+      [ 'dev', 'main', 'prod-support', 'uat' ]
+
+env:
+  SONARQUBE_URL_SET: false
+  MAVEN_REPORT_URL_SET: false
+  AUTOMATION_TEST_URL_SET: false
+
+jobs:
+
+  run_tests:
+    name: Run Automation Tests
+    needs: deploy
+    runs-on: ubuntu-latest
+    outputs:
+      automation_test_url_set: ${{ steps.get_automation_test_url.outputs.automation_test_url_set }}
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run tests script
+        run: |
+          chmod +x .github/workflows/scripts/run_tests.sh
+          .github/workflows/scripts/run_tests.sh "${{ secrets.REPO_PAT }}"
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Get Automation Test URL
+        id: get_automation_test_url
+        if: always()
+        run: |
+          echo "automation_test_url_set=true" >> $GITHUB_OUTPUT
+
+  send_notification:
+    name: Send Email Notification
+    needs: [run_tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set environment variables
+        run: |
+          echo "TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          # Determine the branch name based on the event type
+          if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
+             BRANCH_NAME=$(echo "${GITHUB_HEAD_REF}")
+          else
+             BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          fi
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+          echo "COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an <%ae>')" >> $GITHUB_ENV
+          # Capture full commit message
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          # Escape special characters
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\\/\\\\}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\"/\\\"}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\(/\\(}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\)/\\)}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//#/\\#}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//$'\n'/\\n}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//$'\r'/}"
+          echo "COMMIT_MESSAGE<<EOF" >> $GITHUB_ENV
+          echo "$COMMIT_MESSAGE" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+    
+          echo "This is the Commit Message: $COMMIT_MESSAGE"
+          echo "SONARQUBE_URL_SET=${{ needs.build_and_analyze.outputs.sonarqube_url_set }}" >> $GITHUB_ENV
+          echo "MAVEN_REPORT_URL_SET=${{ needs.deploy.outputs.maven_report_url_set }}" >> $GITHUB_ENV
+          echo "AUTOMATION_TEST_URL_SET=${{ needs.run_tests.outputs.automation_test_url_set }}" >> $GITHUB_ENV
+
+      
+      - name: Debug - Print environment variables
+        run: |
+          echo "TAG: ${{ env.TAG }}"
+          echo "BRANCH_NAME: ${{ env.BRANCH_NAME }}"
+          echo "COMMIT_AUTHOR: ${{ env.COMMIT_AUTHOR }}"
+          echo "COMMIT_MESSAGE: ${{ env.COMMIT_MESSAGE }}"
+
+      - name: Send build success email notification
+        if: >-
+          success() 
+        env:
+          SMTP_SERVER: semicolon.africa
+          SMTP_PORT: 465
+          SMTP_USERNAME: builds@semicolon.africa
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Sending success email with the following details:"
+          echo "This is the Commit Message: $COMMIT_MESSAGE"
+          echo "SonarQube URL Set: $SONARQUBE_URL_SET"
+          echo "Maven Report URL Set: $MAVEN_REPORT_URL_SET"
+          echo "Automation Test URL Set: $AUTOMATION_TEST_URL_SET"
+          chmod +x .github/workflows/scripts/send_test_success_email.sh
+          .github/workflows/scripts/send_test_success_email.sh \
+            "$SMTP_SERVER" \
+            "$SMTP_PORT" \
+            "$SMTP_USERNAME" \
+            "$SMTP_PASSWORD" \
+            "${{ env.EMAILS }}" \
+            "${{ env.TAG }}" \
+            "${{ env.BRANCH_NAME }}" \
+            "${{ env.COMMIT_AUTHOR }}" \
+            "$SONARQUBE_URL_SET" \
+            "$MAVEN_REPORT_URL_SET" \
+            "$AUTOMATION_TEST_URL_SET" \
+            "${{ env.COMMIT_MESSAGE }}" 
+
+      - name: Send build failure email notification
+        if: >-
+          failure() 
+        env:
+          SMTP_SERVER: semicolon.africa
+          SMTP_PORT: 465
+          SMTP_USERNAME: builds@semicolon.africa
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Sending failure email with the following details:"
+          echo "SonarQube URL Set: $SONARQUBE_URL_SET"
+          echo "Maven Report URL Set: $MAVEN_REPORT_URL_SET"
+          echo "Automation Test URL Set: $AUTOMATION_TEST_URL_SET"
+          chmod +x .github/workflows/scripts/send_test_failure_email.sh
+          .github/workflows/scripts/send_test_failure_email.sh \
+            "$SMTP_SERVER" \
+            "$SMTP_PORT" \
+            "$SMTP_USERNAME" \
+            "$SMTP_PASSWORD" \
+            "${{ env.EMAILS }}" \
+            "${{ env.TAG }}" \
+            "${{ env.BRANCH_NAME }}" \
+            "${{ env.COMMIT_AUTHOR }}" \
+            "$SONARQUBE_URL_SET" \
+            "$MAVEN_REPORT_URL_SET" \
+            "$AUTOMATION_TEST_URL_SET" \
+            "${{ env.COMMIT_MESSAGE }}" 
+            
