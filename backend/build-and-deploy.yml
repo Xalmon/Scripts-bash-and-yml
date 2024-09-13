@@ -21,21 +21,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
         with:
-          node-version: '18'
-          
-      - name: Install dependencies
-        run: npm install
-        
-      - name: Run build
-        run: npm run build
+          java-version: '17'  # Specify your required Java version
+          distribution: 'adopt-openjdk'
+
+      - name: Build with Maven
+        run: mvn clean install
         env:
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
-          
+
+      - name: Run SonarQube Analysis
+        run: mvn sonar:sonar
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+
       - name: Get SonarQube URL
         id: get_sonarqube_url
         if: always()
@@ -49,6 +53,7 @@ jobs:
     
     steps:
       - uses: actions/checkout@v3
+
       - name: Set environment variables
         run: |
           # Define your project name
@@ -76,7 +81,6 @@ jobs:
           CUSTOM_TAG="${PROJECT_NAME}-${BRANCH_NAME}-${commit_message_summary// /_}"  
           echo "TAG=${CUSTOM_TAG}" >> $GITHUB_ENV
 
-        
       - name: Send build success email notification
         if: success()
         env:
@@ -100,7 +104,7 @@ jobs:
             "$BUILD_REPORT_URL_SET" \
             "$AUTOMATION_TEST_URL_SET" \
             "${{ env.COMMIT_MESSAGE }}"
-            
+
       - name: Send build failure email notification
         if: failure()
         env:

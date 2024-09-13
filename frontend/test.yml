@@ -73,7 +73,7 @@ jobs:
     
           echo "This is the Commit Message: $COMMIT_MESSAGE"
           echo "SONARQUBE_URL_SET=${{ needs.build_and_analyze.outputs.sonarqube_url_set }}" >> $GITHUB_ENV
-          echo "MAVEN_REPORT_URL_SET=${{ needs.deploy.outputs.maven_report_url_set }}" >> $GITHUB_ENV
+          echo "NPM_REPORT_URL_SET=${{ needs.deploy.outputs.maven_report_url_set }}" >> $GITHUB_ENV
           echo "AUTOMATION_TEST_URL_SET=${{ needs.run_tests.outputs.automation_test_url_set }}" >> $GITHUB_ENV
 
       
