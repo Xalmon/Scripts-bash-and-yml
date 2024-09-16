@@ -1,0 +1,143 @@
+name: Deploy Systest to Amazon ECS
+
+on:
+  push:
+    branches: 
+      - dev
+
+env:
+  REPO_URL: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com/meca-backend-systest
+  ECR_REPOSITORY: meca-backend-systest
+  AWS_REGION: eu-west-1
+  CLUSTER: meca
+  SERVICE: meca-backend-systest
+  EMAILS: 'sam@semicolon.africa,joshua.o@semicolon.africa,solomon@semicolon.africa,abigail@semicolon.africa,chukwunenyeebuka@gmail.com,henry@semicolon.africa,augustineezekiel763@gmail.com,paulineyahla@gmail.com,adioldmj@gmail.com,precious@semicolon.africa,emmanuel.e@semicolon.africa'
+
+jobs:
+  build-and-deploy:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Restore Maven Cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/*.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service --cluster ${{ env.CLUSTER }} --service ${{ env.SERVICE }} --force-new-deployment
+
+  send_notification:
+    name: Send Email Notification
+    needs: [build-and-deploy]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set environment variables
+        run: |
+          PROJECT_NAME="G-S"
+          echo "TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          if [ -n "${{ github.head_ref }}" ]; then
+            echo "BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          fi
+          echo "COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an <%ae>')" >> $GITHUB_ENV
+          sanitized_commit_message=$(git log -1 --pretty=%B | tr -d '\n' | tr -d '\r')
+          echo "COMMIT_MESSAGE=${sanitized_commit_message}" >> $GITHUB_ENV
+          commit_message_summary=$(git log -1 --pretty=%s | tr -d '\n' | tr -d '\r')
+          CUSTOM_TAG="${PROJECT_NAME}-${BRANCH_NAME}-${commit_message_summary// /_}"
+          echo "TAG=${CUSTOM_TAG}" >> $GITHUB_ENV
+
+      - name: Send build success email notification
+        if: success()
+        env:
+          SMTP_SERVER: semicolon.africa
+          SMTP_PORT: 465
+          SMTP_USERNAME: builds@semicolon.africa
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Sending success email..."
+          chmod +x .github/workflows/scripts/send_success_email.sh
+          .github/workflows/scripts/send_success_email.sh \
+            "$SMTP_SERVER" \
+            "$SMTP_PORT" \
+            "$SMTP_USERNAME" \
+            "$SMTP_PASSWORD" \
+            "${{ env.EMAILS }}" \
+            "${{ env.TAG }}" \
+            "${{ env.BRANCH_NAME }}" \
+            "${{ env.COMMIT_AUTHOR }}" \
+            "${{ needs.build-and-deploy.outputs.sonarqube_url_set }}" \
+            "$BUILD_REPORT_URL_SET" \
+            "$AUTOMATION_TEST_URL_SET" \
+            "${{ env.COMMIT_MESSAGE }}"
+
+      - name: Send build failure email notification
+        if: failure()
+        env:
+          SMTP_SERVER: semicolon.africa
+          SMTP_PORT: 465
+          SMTP_USERNAME: builds@semicolon.africa
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          echo "Sending failure email..."
+          chmod +x .github/workflows/scripts/send_failure_email.sh
+          .github/workflows/scripts/send_failure_email.sh \
+            "$SMTP_SERVER" \
+            "$SMTP_PORT" \
+            "$SMTP_USERNAME" \
+            "$SMTP_PASSWORD" \
+            "${{ env.EMAILS }}" \
+            "${{ env.TAG }}" \
+            "${{ env.BRANCH_NAME }}" \
+            "${{ env.COMMIT_AUTHOR }}" \
+            "${{ needs.build-and-deploy.outputs.sonarqube_url_set }}" \
+            "$BUILD_REPORT_URL_SET" \
+            "$AUTOMATION_TEST_URL_SET" \
+            "${{ env.COMMIT_MESSAGE }}"
