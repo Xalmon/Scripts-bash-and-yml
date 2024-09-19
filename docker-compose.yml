@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend #replace with path for the backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./frontend ##replace with path for the frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+    ports:
+      - "5432:5432"
+
+# # React Application
+# # Use the official Node.js image to build the application
+# FROM node:18 AS build
+
+# # Set the working directory
+# WORKDIR /app
+
+# # Copy package.json and install dependencies
+# COPY package.json package-lock.json ./
+# RUN npm install
+
+# # Copy the source code
+# COPY . .
+
+# # Build the application
+# RUN npm run build
+
+# # Use Nginx to serve the application
+# FROM nginx:alpine
+
+# # Copy the build files from the build stage to the Nginx html folder
+# COPY --from=build /app/build /usr/share/nginx/html
+
+# # Expose the application port
+# EXPOSE 80
+
+# # Start Nginx
+# CMD ["nginx", "-g", "daemon off;"]
+
+# #PostgreSQL
+# # Use the official PostgreSQL image
+# FROM postgres:15
+
+# # Set environment variables for the database
+# ENV POSTGRES_DB=mydb
+# ENV POSTGRES_USER=myuser
+# ENV POSTGRES_PASSWORD=mypassword
+
+# # Expose the PostgreSQL port
+# EXPOSE 5432
+
+# # No additional commands are necessary; the official image's default entry point will start PostgreSQL
